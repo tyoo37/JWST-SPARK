@@ -1,6 +1,6 @@
 """Synthetic checks: the level-1 fit recovers (a, b), and the curve inversion recovers a known charge."""
 import numpy as np
-from satrestore import level1, curve
+from jwst_spark import level1, curve
 
 
 def test_level1_fit_and_selftest():
@@ -27,7 +27,7 @@ def test_invert_recovers_charge():
 
 def test_psf_fit_recovers_hidden_core():
     from photutils.psf import FittableImageModel
-    from satrestore import psf
+    from jwst_spark import psf
     o = 4
     yy, xx = np.mgrid[:81, :81] / o - 10
     model = FittableImageModel(np.exp(-(xx ** 2 + yy ** 2) / (2 * 1.5 ** 2)), oversampling=o)
@@ -40,7 +40,7 @@ def test_psf_fit_recovers_hidden_core():
 
 
 def test_star_predictor_learns_psf_error():
-    from satrestore import starmodel
+    from jwst_spark import starmodel
     rng = np.random.default_rng(0)
     rows = []
     for sid in range(60):

@@ -8,7 +8,7 @@ Mode 'train': the same, with the PSF values corrected by the star predictor (sta
 stars with hidden cores; with too few such stars it reports so and keeps the direct fit. Mode 'train' (the star predictor trained
 on the program's own PSF fits) is not written yet.
 
-Sidecar <out>/<exposure>_satrestore.fits: SCI (MJy/sr: the pipeline value, or the restored one), METHOD (index into the header
+Sidecar <out>/<exposure>_spark.fits: SCI (MJy/sr: the pipeline value, or the restored one), METHOD (index into the header
 table METHOD<k>), ERR (dex, restored pixels), and the run's self-test summary in summary.json.
 """
 import json
@@ -292,7 +292,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
             hdr[f'METHOD{i}'] = m
         fits.HDUList([fits.PrimaryHDU(header=hdr), fits.ImageHDU(sci, name='SCI', header=fits.Header([('BUNIT', 'MJy/sr')])),
                       fits.ImageHDU(meth, name='METHOD'), fits.ImageHDU(errd, name='ERR', header=fits.Header([('BUNIT', 'dex')]))]
-                     ).writeto(f'{out_dir}/{e["name"]}_satrestore.fits', overwrite=True)
+                     ).writeto(f'{out_dir}/{e["name"]}_spark.fits', overwrite=True)
         counts.append(dict(exposure=e['name'], conv_check_dex=conv_check, no_value_before=int(np.isnan(e['sci']).sum()),
                            no_value_after=int(np.isnan(sci).sum()), **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
         log(f'{e["name"]}: conversion check {conv_check:.4f} dex; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)

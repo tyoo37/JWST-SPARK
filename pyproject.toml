@@ -3,14 +3,18 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "satrestore"
-version = "0.0.1"
-description = "Restore saturated pixels in JWST imaging (test package)"
+name = "jwst-spark"
+version = "0.1.0"
+description = "JWST-SPARK: Saturated Pixel Automated Recovery Kit, restoring saturated pixels in JWST MIRI imaging"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy", "scipy", "astropy", "photutils", "stpsf", "scikit-learn"]
 
+[project.scripts]
+jwst-spark = "jwst_spark.__main__:main"
+
 [tool.setuptools]
-packages = ["satrestore"]
+packages = ["jwst_spark"]
 
 [tool.setuptools.package-data]
-satrestore = ["data/*.csv"]
+jwst_spark = ["data/*.csv"]
