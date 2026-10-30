@@ -63,7 +63,7 @@ On the ten test datasets (half-widths of the self-tests):
 - first-group map at high signal: 0.0005 dex or better;
 - level-1 correction: 0.007-0.045 dex.
 
-At F2550W the PSF fit and the curve agree to 0.002-0.022 dex. At F770W-F2100W the PSF fit runs 0.07-0.22 dex above the curve, so the gate keeps PSF fills off there.
+At F2550W the PSF fit and the curve agree to 0.002-0.022 dex. At F770W-F2100W the PSF fit runs 0.06-0.22 dex above the curve, so the gate keeps PSF fills off there.
 
 ## Reference maps
 
