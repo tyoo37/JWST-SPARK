@@ -43,9 +43,15 @@ def selftest(X, y, rng):
     return dict(n=len(d), median=float(np.median(d)), half_width=hw(d), median_top10=float(np.median(d[top])), half_width_top10=hw(d[top]))
 
 
+def pixels(e):
+    """Pixel-integrations the correction serves: level 1, and levels 2-4 left without a pipeline rate (jwst 1.15 drops MIRI's
+    first group, so a 2-group ramp keeps one group and gets no rate; sgrb2). Needs no pipeline rate, only lin0."""
+    return ((e['lev'] == 1) | (np.isin(e['lev'], LEVELS) & ~np.isfinite(e['rates']))) & np.isfinite(e['lin0'])
+
+
 def correct(e, ab):
-    """Corrected rates (nints, ny, nx) of the level-1 pixels, NaN elsewhere; ab (nints, 2) per integration."""
+    """Corrected rates (nints, ny, nx) of the pixels() above, NaN elsewhere; ab (nints, 2) per integration."""
     T = e['ro'].tgroup
-    l1 = (e['lev'] == 1) & np.isfinite(e['lin0'])     # no pipeline rate needed: jwst 1.15 leaves one-group ramps without one (sgrb2)
+    l1 = pixels(e)
     a, b = ab[:, 0, None, None], ab[:, 1, None, None]
     return np.where(l1, (e['lin0'] - b) / (a * T), np.nan).astype(np.float32)

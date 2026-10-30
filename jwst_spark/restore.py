@@ -254,20 +254,20 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         R = np.where(e['lev'] >= 2, e['rates'], np.nan)
         M = np.zeros(e['lev'].shape, np.int8)
         E = np.full(e['lev'].shape, np.nan, np.float32)
-        l1 = e['lev'] == 1
+        l1 = level1.pixels(e)
         R[l1], M[l1], E[l1] = level1.correct(e, AB[k * NI:(k + 1) * NI])[l1], 1, l1err
         s = t['k'] == k
         R[t['int_'][s], t['y'][s], t['x'][s]] = rate[s]
         M[t['int_'][s], t['y'][s], t['x'][s]] = method[s]
         E[t['int_'][s], t['y'][s], t['x'][s]] = err[s]
-        touched = (e['lev'] <= 1).any(0) & ((e['dq'] & curve.NOFLAT) == 0)
+        touched = ((e['lev'] <= 1) | l1).any(0) & ((e['dq'] & curve.NOFLAT) == 0)
         with np.errstate(all='ignore'):
             new = np.nanmean(np.where(np.isfinite(R) & (R > 0), R, np.nan), 0) * conv
             # the conversion must reproduce the pipeline where it calibrated an untouched pixel
             ok = ~touched & np.isfinite(e['sci']) & (e['sci'] > 0) & (e['rates'] > 0).all(0)
             conv_check = float(np.median(np.abs(np.log10(e['rates'].mean(0)[ok] * conv[ok] / e['sci'][ok]))))
         sci = np.where(touched, new, e['sci']).astype(np.float32)
-        used = (e['lev'] <= 1) & np.isfinite(R) & (R > 0)
+        used = ((e['lev'] <= 1) | l1) & np.isfinite(R) & (R > 0)
         meth = np.where(touched, np.where(np.isfinite(new), np.where(used, M, 0).max(0), 4), 0).astype(np.uint8)
         errd = np.where(touched & np.isfinite(new), np.fmax.reduce(np.where(used, E, np.nan), axis=0), np.nan).astype(np.float32)
         # PSF fit to the measured pixels around each compact saturated region: fills what the curve left empty, checks the rest
