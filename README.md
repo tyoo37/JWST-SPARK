@@ -32,7 +32,7 @@ Requires Python 3.10 or later, numpy, scipy, astropy, photutils, scikit-learn an
 
 ## Use
 
-One filter and one readout per run. Each `_cal.fits` needs its `_uncal.fits`, `_ramp.fits` and `_rateints.fits` (or `_rate.fits`) next to it, as written by the JWST stage 1 and stage 2 pipelines.
+One filter and one readout per run. Each `_cal.fits` needs its `_uncal.fits`, `_ramp.fits` and `_rateints.fits` (or `_rate.fits`) next to it, as written by the JWST stage 1 and stage 2 pipelines. Tested with files from jwst 1.15 and 1.21.
 
 ```
 jwst-spark --out restored/ path/to/jw*_mirimage_cal.fits
@@ -44,7 +44,7 @@ jwst-spark --out restored_train/ --mode train --psf-cache psf_cache/ path/to/jw*
 ## Output
 
 - `<out>/<exposure>_spark.fits`, on the detector grid of the `_cal` file:
-  - `SCI`: MJy/sr, the pipeline value or the restored one. The conversion reproduces the pipeline's own calibration; the run checks this on every exposure.
+  - `SCI`: MJy/sr, the pipeline value or the restored one. Pixels the pipeline flags DO_NOT_USE stay empty unless restored (jwst 1.21 already leaves them empty; jwst 1.15 keeps dimmed values in the coronagraph regions). The conversion reproduces the pipeline's own calibration; the run checks this on every exposure.
   - `METHOD`: which method gave the value (index into the header table `METHOD0`, `METHOD1`, ...).
   - `ERR`: the uncertainty of restored values in dex, from the method's self-test.
 - `<out>/summary.json`: the readout, the level-1 fits and self-tests, the curve self-test by charge and row parity, the first-group map self-test and reference-map agreement, the PSF self-test and its agreement with the curve, and the counts per method for every exposure.
