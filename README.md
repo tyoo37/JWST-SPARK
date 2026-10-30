@@ -59,9 +59,9 @@ Each method is tested on the dataset before its values are used:
 - PSF fit: unsaturated stars get their 1-63 brightest pixels hidden and restored.
 
 On the ten test datasets (half-widths of the self-tests):
-- response curve, first charge bin above saturation: 0.006-0.047 dex; even detector rows are 1.2 to 3 times wider than odd rows;
+- response curve, first charge bin above saturation: 0.006-0.047 dex; even detector rows are 1.1 to 3 times wider than odd rows;
 - first-group map at high signal: 0.0005 dex or better;
-- level-1 correction: 0.008-0.045 dex.
+- level-1 correction: 0.007-0.045 dex.
 
 At F2550W the PSF fit and the curve agree to 0.002-0.022 dex. At F770W-F2100W the PSF fit runs 0.07-0.22 dex above the curve, so the gate keeps PSF fills off there.
 
