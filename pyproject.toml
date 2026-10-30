@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "satrestore"
+version = "0.0.1"
+description = "Restore saturated pixels in JWST imaging (test package)"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "astropy", "photutils", "stpsf", "scikit-learn"]
+
+[tool.setuptools]
+packages = ["satrestore"]
+
+[tool.setuptools.package-data]
+satrestore = ["data/*.csv"]

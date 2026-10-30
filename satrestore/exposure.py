@@ -1,0 +1,63 @@
+"""One exposure: the readout setup from its header and the arrays the methods need, from the pipeline's _uncal, _ramp,
+_rateints/_rate and _cal files next to each other."""
+import os
+from dataclasses import dataclass
+import numpy as np
+from astropy.io import fits
+
+SATURATED, JUMP = 2, 4          # GROUPDQ bits (jwst.datamodels.dqflags)
+
+
+@dataclass
+class Readout:
+    instrument: str
+    detector: str
+    filter: str
+    readpatt: str
+    ngroups: int
+    nints: int
+    tgroup: float
+    subarray: str
+
+    @classmethod
+    def from_header(cls, h):
+        return cls(h['INSTRUME'], h['DETECTOR'], h['FILTER'], h['READPATT'], int(h['NGROUPS']), int(h['NINTS']),
+                   float(h['TGROUP']), h['SUBARRAY'])
+
+
+def load(cal_path):
+    """Arrays of one exposure (integration axis first where per integration):
+    raw (nints, ngroups, ny, nx) uncal DN; lev (nints, ny, nx) first saturated group (ngroups if none); jump (nints, ny, nx);
+    lin0 (nints, ny, nx) linearised group 0; pdq PIXELDQ; rates (nints, ny, nx) DN/s; sci, dq the _cal SCI and DQ; photmjsr."""
+    base = cal_path[:-len('_cal.fits')]
+    with fits.open(cal_path) as h:
+        header, ro = h[0].header, Readout.from_header(h[0].header)
+        sci, err, dq, photmjsr = h['SCI'].data.astype(np.float32), h['ERR'].data, h['DQ'].data, float(h['SCI'].header['PHOTMJSR'])
+    raw = fits.getdata(f'{base}_uncal.fits', 'SCI').astype(np.float32)
+    with fits.open(f'{base}_ramp.fits') as h:
+        gdq, lin0, pdq = h['GROUPDQ'].data, h['SCI'].data[:, 0].astype(np.float32), h['PIXELDQ'].data
+    rates = fits.getdata(f'{base}_rateints.fits', 'SCI') if os.path.exists(f'{base}_rateints.fits') \
+        else fits.getdata(f'{base}_rate.fits', 'SCI')[None]
+    assert raw.shape[:2] == (ro.nints, ro.ngroups) and rates.shape[0] == ro.nints, (raw.shape, rates.shape, ro)
+    sat = (gdq & SATURATED) > 0
+    lev = np.where(sat.any(1), sat.argmax(1), ro.ngroups).astype(np.int16)
+    return dict(name=os.path.basename(base), path=cal_path, header=header, ro=ro, raw=raw, err=err, lev=lev, jump=((gdq & JUMP) > 0).any(1),
+                lin0=lin0, pdq=pdq, rates=rates.astype(np.float32), sci=sci, dq=dq, photmjsr=photmjsr)
+
+
+def flat_ratio(e):
+    """SCI / (rate x PHOTMJSR) where the pipeline calibrated the pixel: 1 / flat, one exposure's estimate."""
+    with np.errstate(all='ignore'):
+        r = e['sci'] / (e['rates'].mean(0) * e['photmjsr'])
+    return np.where(np.isfinite(r) & (r > 0), r, np.nan).astype(np.float32)
+
+
+def inverse_flat(ratios):
+    """1 / flat per detector pixel: the median of flat_ratio over the exposures (a pixel saturated in one dither is usually
+    measured in another); pixels never calibrated take the mean of their 5x5 neighbourhood. DN/s x PHOTMJSR x this = MJy/sr."""
+    from scipy import ndimage
+    inv = np.nanmedian(np.array(ratios), 0)
+    ok = np.isfinite(inv)
+    with np.errstate(all='ignore'):
+        near = ndimage.uniform_filter(np.where(ok, inv, 0.), 5) / ndimage.uniform_filter(ok.astype(float), 5)
+    return np.where(ok, inv, near).astype(np.float32)
