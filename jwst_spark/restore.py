@@ -34,6 +34,8 @@ REF_DIR = os.path.join(os.path.dirname(__file__), 'data')   # raw -> linearised 
                                # linearity reference (miri_group0_map_<reference>.csv); used beyond a dataset's own range
 REF_AGREE = 0.003              # dex: the reference map is used only if it matches the dataset's own map this well where both
                                # are sampled (brick, cloudc against ngc6334: 0.0015 or better)
+PSF_BIAS = 0.05                # dex: PSF fills only if the PSF self-test (median over 1-15 pixels hidden) and the PSF fit against the curve
+                               # where both give a value are both within this (gc1266 F770W: self-test +0.13 dex; ngc6334 F2100W: against the curve +0.16)
 NMIN_L1 = 2000                 # pixels with 2-4 good groups needed for an exposure's own level-1 fit; fewer: the pooled fit
 hw = lambda v: float((np.percentile(v, 84) - np.percentile(v, 16)) / 2)
 
@@ -236,13 +238,15 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                      half_width=hw(prow[prow[:, 1] == nh, 2])) for nh in psf.HIDE if (prow[:, 1] == nh).sum() >= 20]
     psf_err = max([np.hypot(r['median'], r['half_width']) for r in psf_test], default=np.nan)
     log('PSF self-test (pixels hidden, n, median, half-width dex):', [(r['hidden'], r['n'], round(r['median'], 3), round(r['half_width'], 3)) for r in psf_test], flush=True)
+    small = prow[prow[:, 1] <= 15, 2]            # pooled over 1-15 hidden pixels: single bins can hold few stars (brick: 77)
+    psf_selftest_ok = len(small) >= 50 and abs(float(np.median(small))) <= PSF_BIAS
     star_model, star_info = starmodel.train(prow) if mode == 'train' else (None, {})
     if mode == 'train':
         star_err = max([np.hypot(r['trained_median'], r['trained_half_width']) for r in star_info.get('selftest', [])], default=psf_err)
         log('star predictor:', star_info, flush=True)
 
-    # pass 2: one sidecar per exposure
-    counts, both, both_direct = [], [], []
+    # pass 2: one sidecar per exposure (written once the PSF fit's agreement with the curve over all exposures is known)
+    counts, both, both_direct, pending = [], [], [], []
     for k, p in enumerate(cal_paths):
         e = exposure.load(p)
         conv = e['photmjsr'] * inv_flat
@@ -283,19 +287,8 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
             pv, code, perr = pt, 6, star_err
         cmp = (meth == 3) & (pv > 0) & (sci > 0)
         both.append(np.log10(pv[cmp] / sci[cmp]))
-        fill = (meth == 4) & (pv > 0)
-        sci[fill], meth[fill], errd[fill] = pv[fill], code, perr
-        sci[meth == 7], errd[meth == 7] = np.nan, np.nan
-        hdr = fits.Header()
-        hdr['EXPOSURE'], hdr['MODE'], hdr['CONVCHK'] = e['name'], mode, (conv_check, 'median |dex| of rate x conv vs pipeline SCI')
-        for i, m in enumerate(METHODS):
-            hdr[f'METHOD{i}'] = m
-        fits.HDUList([fits.PrimaryHDU(header=hdr), fits.ImageHDU(sci, name='SCI', header=fits.Header([('BUNIT', 'MJy/sr')])),
-                      fits.ImageHDU(meth, name='METHOD'), fits.ImageHDU(errd, name='ERR', header=fits.Header([('BUNIT', 'dex')]))]
-                     ).writeto(f'{out_dir}/{e["name"]}_spark.fits', overwrite=True)
-        counts.append(dict(exposure=e['name'], conv_check_dex=conv_check, no_value_before=int(np.isnan(e['sci']).sum()),
-                           no_value_after=int(np.isnan(sci).sum()), **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
-        log(f'{e["name"]}: conversion check {conv_check:.4f} dex; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)
+        pending.append((e['name'], int(np.isnan(e['sci']).sum()), conv_check, sci, meth, errd,
+                        np.where(pv > 0, pv, np.nan).astype(np.float32), code, perr))
 
     agree_of = lambda v: dict(n=int(len(v)), median=float(np.median(v)), half_width=hw(v)) if len(v) >= 20 else {}
     agree = agree_of(np.concatenate(both))
@@ -303,8 +296,27 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     if both_direct:
         star_info['direct_psf_minus_curve'] = agree_of(np.concatenate(both_direct))
         log('  (direct PSF fit, before the trained correction:', star_info['direct_psf_minus_curve'], ')', flush=True)
+    use_psf = psf_selftest_ok and (not agree or abs(agree['median']) <= PSF_BIAS)
+    log(f'PSF fills {"on" if use_psf else "off"}: self-test within {PSF_BIAS} dex: {psf_selftest_ok}; against the curve: '
+        f'{agree.get("median", "no overlap")}', flush=True)
+    for name, nv0, conv_check, sci, meth, errd, pv, code, perr in pending:
+        if use_psf:
+            fill = (meth == 4) & np.isfinite(pv)
+            sci[fill], meth[fill], errd[fill] = pv[fill], code, perr
+        sci[meth == 7], errd[meth == 7] = np.nan, np.nan
+        hdr = fits.Header()
+        hdr['EXPOSURE'], hdr['MODE'], hdr['CONVCHK'] = name, mode, (conv_check, 'median |dex| of rate x conv vs pipeline SCI')
+        for i, m in enumerate(METHODS):
+            hdr[f'METHOD{i}'] = m
+        fits.HDUList([fits.PrimaryHDU(header=hdr), fits.ImageHDU(sci, name='SCI', header=fits.Header([('BUNIT', 'MJy/sr')])),
+                      fits.ImageHDU(meth, name='METHOD'), fits.ImageHDU(errd, name='ERR', header=fits.Header([('BUNIT', 'dex')]))]
+                     ).writeto(f'{out_dir}/{name}_spark.fits', overwrite=True)
+        counts.append(dict(exposure=name, conv_check_dex=conv_check, no_value_before=nv0,
+                           no_value_after=int(np.isnan(sci).sum()), **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
+        log(f'{name}: conversion check {conv_check:.4f} dex; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)
     summary = dict(mode=mode, readout=vars(ro0), n_exposures=n, census=census, detector_defects=int(defect.sum()), level1=l1tests,
                    curve=dict(curves, beyond_valid=int(beyond.sum())), first_group=dict(map_selftest=l0tests, err=l0err),
-                   psf=dict(selftest=psf_test, err=psf_err, psf_minus_curve=agree, rchi2_max=psf.RCHI2_MAX), star_model=star_info, counts=counts)
+                   psf=dict(selftest=psf_test, err=psf_err, psf_minus_curve=agree, rchi2_max=psf.RCHI2_MAX, fills_on=bool(use_psf),
+                            selftest_ok=bool(psf_selftest_ok)), star_model=star_info, counts=counts)
     json.dump(summary, open(f'{out_dir}/summary.json', 'w'), indent=1)
     return summary

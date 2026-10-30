@@ -83,6 +83,8 @@ def fit_curve(lq, y, nmin=300):
     lo, hi = np.searchsorted(lq, LQ - 0.005), np.searchsorted(lq, LQ + 0.005)
     R = np.array([np.median(y[a:b]) if b - a >= nmin else np.nan for a, b in zip(lo, hi)])
     good = np.where(np.isfinite(R))[0]
+    if not len(good):
+        raise ValueError(f'no 0.01-dex bin of log q has {nmin} saturated points: too few for the response curve')
     i0, i1 = good[0], good[-1]
     R[i0:i1 + 1] = np.maximum.accumulate(np.interp(LQ[i0:i1 + 1], LQ[good], R[good]))
     R[:i0], R[i1 + 1:] = R[i0], R[i1]
@@ -97,7 +99,17 @@ def build(c, rows, bias, AB, T, qthr, nmin=300):
     lq, y, j, r = sat_points(c, rows, AB, T, qthr)
     y = y - bias[r]
     cg = [g for g in CURVE_GROUPS if g <= G - 2] or list(range(1, G))
-    R, lqmax = fit_curve(lq[np.isin(j, cg)], y[np.isin(j, cg)], nmin)
+    later = list(range(max(cg) + 1, G - 1))
+    while True:
+        try:
+            R, lqmax = fit_curve(lq[np.isin(j, cg)], y[np.isin(j, cg)], nmin)
+            break
+        except ValueError:
+            # many groups and few exposures (cloudc F770W: 20 groups, 4 exposures): most calibrators saturate after the early
+            # groups, so those are too sparse; add the next group (it keeps no offset of its own) until the curve fits
+            if not later:
+                raise
+            cg.append(later.pop(0))
     res = y - np.interp(lq, LQ, R)
     delta = np.zeros(G)
     for g in set(range(1, G)) - set(cg):
