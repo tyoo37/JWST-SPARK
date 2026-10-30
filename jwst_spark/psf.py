@@ -35,7 +35,9 @@ def psf_model(h, cache_dir, oversample=4, fov=81, log=print):
             inst.load_wss_opd_by_date(h['DATE-OBS'], plot=False)
         except (OSError, RuntimeError, ValueError) as ex:   # no network or no token: the default optical state
             log(f'psf: no telescope state for {h["DATE-OBS"]} ({ex}); default', flush=True)
-        inst.calc_psf(fov_pixels=fov, oversample=oversample).writeto(fn)
+        tmp = f'{fn}.{os.getpid()}.tmp'          # runs sharing the cache may build the same model at once
+        inst.calc_psf(fov_pixels=fov, oversample=oversample).writeto(tmp)
+        os.replace(tmp, fn)
     with fits.open(fn) as p:
         data = p['OVERDIST'].data if 'OVERDIST' in p else p[0].data
     return FittableImageModel(data, oversampling=oversample)

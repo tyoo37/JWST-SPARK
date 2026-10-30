@@ -38,7 +38,8 @@ def instances(e, k, sel, rates, rng, nmax):
 def calibrators(e, k, rates, rng, nmax=40_000):
     """Pixels with a known rate (rates: level-1 corrected) that saturated in a later group."""
     G = e['ro'].ngroups
-    sel = (e['lev'] >= 1) & (e['lev'] <= G - 1) & ~e['jump'] & ((e['pdq'] & NORESTORE) == 0)[None] & np.isfinite(rates) & (rates > 0)
+    known = (np.isfinite(rates) & (rates > 0)) | ((e['lev'] == 1) & np.isfinite(e['lin0']))   # level 1: rate from lin0 (restore.run)
+    sel = (e['lev'] >= 1) & (e['lev'] <= G - 1) & ~e['jump'] & ((e['pdq'] & NORESTORE) == 0)[None] & known
     return instances(e, k, sel, rates, rng, nmax)
 
 

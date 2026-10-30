@@ -46,6 +46,6 @@ def selftest(X, y, rng):
 def correct(e, ab):
     """Corrected rates (nints, ny, nx) of the level-1 pixels, NaN elsewhere; ab (nints, 2) per integration."""
     T = e['ro'].tgroup
-    l1 = (e['lev'] == 1) & np.isfinite(e['rates'])
+    l1 = (e['lev'] == 1) & np.isfinite(e['lin0'])     # no pipeline rate needed: jwst 1.15 leaves one-group ramps without one (sgrb2)
     a, b = ab[:, 0, None, None], ab[:, 1, None, None]
     return np.where(l1, (e['lin0'] - b) / (a * T), np.nan).astype(np.float32)
