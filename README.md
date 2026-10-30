@@ -10,7 +10,7 @@ For each pixel with no pipeline value, or a biased one, the package picks the fi
 
 | Method | Pixels | How |
 |---|---|---|
-| level-1 corrected | only the first group below saturation | the pipeline's one-group value misses the first-group pedestal; corrected with `lin0 = a X + b`, fitted per exposure and integration on pixels with 2-4 good groups (pooled over the exposures when fewer than 2,000 such pixels). It needs only the linearised first group, so one-group ramps without a pipeline rate are covered too |
+| level-1 corrected | only the first group below saturation | the pipeline's one-group value misses the first-group pedestal; corrected with `lin0 = a X + b`, fitted per exposure and integration on pixels with 2-4 good groups (pooled over the exposures when fewer than 2,000 such pixels). It needs only the linearised first group, so it also serves ramps the pipeline left without a rate: one-group ramps, and 2-4-group ramps in jwst 1.15, which drops MIRI's first group |
 | first group linearised | flagged as saturated only because a neighbour saturated | the pipeline does not linearise a flagged group; the package maps the raw first group to its linearised value with the dataset's own map, extended to saturation by a reference map of the same CRDS linearity file, then applies the level-1 correction |
 | response curve | saturated in their first group | how the raw signal keeps growing past saturation, measured on the dataset's own pixels of known brightness (groups 2-4, or later groups when those hold too few), then read backwards from the pixel's saturated groups. One curve per detector row parity where both parities have at least 20,000 calibration rows. Used only up to the charge where its self-test stays within 0.1 dex |
 | PSF fit | compact saturated cores the curve leaves empty | the STPSF model for the observation date fitted to the measured pixels around the core; refused when the source does not look point-like (reduced chi-square above 5) or its surroundings are not measured. Used only when the PSF self-test (1-15 hidden pixels) and its agreement with the curve, where both give a value, are within 0.05 dex |
@@ -75,6 +75,7 @@ At F2550W the PSF fit and the curve agree to 0.002-0.022 dex. At F770W-F2100W th
 - Reference maps exist for FASTR1 full frame and three linearity references.
 - The response curve is tested only up to the charge its calibration pixels reach; brighter pixels stay empty. When the calibration pixels do not reach saturation at all (one F770W test set), the curve restores nothing.
 - At F770W-F2100W the PSF fit is biased high against the curve, probably because the model lacks detector features such as the cruciform; PSF fills stay off there.
+- Pixels the pipeline flags only because a neighbour saturated in group 1 look like level-1 pixels. Against estimates from their own later groups, the level-1 correction reads them 0.05-0.2 dex low (tested on MIRI F770W-F2100W). Part of that gap may come from charge the neighbour adds to those later groups, so the size is not settled yet.
 - Even detector rows near saturation scatter more than odd rows, and the scatter does not repeat between exposures. Their larger error is carried in `ERR`. Level-1 corrected pixels keep an even/odd pattern of about ±0.01 dex.
 
 ## Tests
