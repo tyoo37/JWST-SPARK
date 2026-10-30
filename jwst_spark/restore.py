@@ -232,6 +232,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     for kk, p in enumerate(cal_paths if mode == 'train' else cal_paths[::max(1, n // NPSF_TEST)][:NPSF_TEST]):
         with fits.open(p) as h:
             sci0, err0, m = h['SCI'].data.astype(float), h['ERR'].data.astype(float), model_of(h[0].header)
+            sci0[(h['DQ'].data & exposure.DO_NOT_USE) > 0] = np.nan
         prow += [(r[0] + 1000 * kk, *r[1:]) for r in psf.selftest(sci0, err0, np.isfinite(sci0), m, rng)]   # star ids unique per run
     prow = np.array(prow).reshape(-1, 3 + len(starmodel.FEATURES))
     psf_test = [dict(hidden=int(nh), n=int((prow[:, 1] == nh).sum()), median=float(np.median(prow[prow[:, 1] == nh, 2])),

@@ -6,6 +6,7 @@ import numpy as np
 from astropy.io import fits
 
 SATURATED, JUMP = 2, 4          # GROUPDQ bits (jwst.datamodels.dqflags)
+DO_NOT_USE = 1                  # _cal DQ bit
 
 
 @dataclass
@@ -33,7 +34,8 @@ def load(cal_path):
     with fits.open(cal_path) as h:
         header, ro = h[0].header, Readout.from_header(h[0].header)
         sci, err, dq, photmjsr = h['SCI'].data.astype(np.float32), h['ERR'].data, h['DQ'].data, float(h['SCI'].header['PHOTMJSR'])
-    raw = fits.getdata(f'{base}_uncal.fits', 'SCI').astype(np.float32)
+    sci[(dq & DO_NOT_USE) > 0] = np.nan      # jwst 1.15 keeps values there (coronagraph regions); 1.21 gives NaN
+    raw =fits.getdata(f'{base}_uncal.fits', 'SCI').astype(np.float32)
     with fits.open(f'{base}_ramp.fits') as h:
         gdq, lin0, pdq = h['GROUPDQ'].data, h['SCI'].data[:, 0].astype(np.float32), h['PIXELDQ'].data
     rates = fits.getdata(f'{base}_rateints.fits', 'SCI') if os.path.exists(f'{base}_rateints.fits') \
