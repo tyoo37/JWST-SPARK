@@ -12,7 +12,9 @@ from scipy import ndimage
 from scipy.optimize import least_squares
 from photutils.psf import FittableImageModel
 
-HALF = 12            # half-size of the fitting box beyond the region (px)
+HALF = 4             # half-size of the fitting box beyond the region (px). The model's wings beyond a few pixels do not match the
+                     # data: with 12, PSF - curve was +0.16 dex at F2100W (ngc6334) and +0.065 at F1500W; with 4, +0.007 and +0.041,
+                     # and the F2550W self-tests tighten (satrestore_tests/psfbias, 2026-10-31)
 AMAX = 400           # largest region fitted (px); larger ones are extended emission, not a star
 REL_ERR = 0.05       # relative error floor of a measured pixel (PSF model mismatch)
 HIDE = (1, 3, 7, 15, 31, 63)   # self-test: number of brightest pixels hidden
@@ -47,6 +49,9 @@ def psf_model(h, cache_dir, oversample=4, fov=81, log=print):
         os.replace(tmp, fn)
     with fits.open(fn) as p:
         data = p['OVERDIST'].data if 'OVERDIST' in p else p[0].data
+    # OVERDIST is sampled at points; a detector pixel integrates over its area (top-hat of `oversample` sub-pixels)
+    box = np.r_[0.5, np.ones(oversample - 1), 0.5] / oversample
+    data = ndimage.convolve1d(ndimage.convolve1d(data, box, axis=0, mode='constant'), box, axis=1, mode='constant')
     return FittableImageModel(data, oversampling=oversample)
 
 
