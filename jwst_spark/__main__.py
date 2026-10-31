@@ -1,5 +1,5 @@
-"""jwst-spark --out DIR [--mode notrain|train] [--psf-cache DIR] <_cal.fits ...>   (or python -m jwst_spark; one filter and
-readout per run; the _uncal, _ramp and _rateints or _rate files next to each _cal file)."""
+"""jwst-spark --out DIR [--mode notrain|train] [--psf-cache DIR] <_cal.fits ...>   (or python -m jwst_spark; one filter,
+readout and detector per run; the _uncal, _ramp and _rateints or _rate files next to each _cal file)."""
 import argparse
 from .restore import run
 

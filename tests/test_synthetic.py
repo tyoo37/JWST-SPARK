@@ -64,6 +64,6 @@ def test_neighbour_gap_measures_extra_charge():
     for g in range(1, 5):
         raw[0, g] = raw[0, g - 1] + np.where((lev[0] == 1) & (g == 1), 1.2 * X, X)    # 20% extra charge in their first increment
     e = dict(ro=SimpleNamespace(ngroups=5, tgroup=1.0), lev=lev, raw=raw, rates=X[None], pdq=np.zeros((80, 80), np.uint32),
-             jump=np.zeros((1, 80, 80), bool), lin0=(4400 + 0.78 * X)[None])
+             jump=np.zeros((1, 80, 80), bool), lin0=(4400 + 0.78 * X)[None], satdn=np.full((80, 80), 56660.))
     nb, gap = level1.neighbour_gap(e, 0, (0.78, 4400.))
     assert nb.sum() == 400 and abs(np.median(gap) + np.log10(1.2)) < 0.005, (nb.sum(), np.median(gap))

@@ -26,11 +26,18 @@ SHARP = 1.5          # self-test stars: peak / mean of its 8 neighbours at most 
 def psf_model(h, cache_dir, oversample=4, fov=81, log=print):
     """FittableImageModel of the exposure's instrument and filter (primary header h), cached in cache_dir."""
     os.makedirs(cache_dir, exist_ok=True)
-    fn = f'{cache_dir}/' + f'psf_{h["INSTRUME"]}_{h["FILTER"]}_{h["DATE-OBS"]}_o{oversample}_f{fov}.fits'.lower()
+    nrc = h['INSTRUME'] == 'NIRCAM'
+    # NIRCam: narrow and medium bands in the pupil wheel (F162M, F323N, F405N, ...) name the filter; long-wavelength detectors are
+    # NRCA5/NRCB5 in STPSF
+    filt = h['PUPIL'] if nrc and str(h.get('PUPIL', '')).startswith('F') else h['FILTER']
+    det = h['DETECTOR'].replace('LONG', '5') if nrc else ''
+    fn = f'{cache_dir}/' + f'psf_{h["INSTRUME"]}_{det}{"_" if det else ""}{filt}_{h["DATE-OBS"]}_o{oversample}_f{fov}.fits'.lower()
     if not os.path.exists(fn):
         import stpsf
-        inst = stpsf.MIRI() if h['INSTRUME'] == 'MIRI' else stpsf.NIRCam()
-        inst.filter = h['FILTER']
+        inst = stpsf.NIRCam() if nrc else stpsf.MIRI()
+        inst.filter = filt
+        if nrc:
+            inst.detector = det
         try:
             inst.load_wss_opd_by_date(h['DATE-OBS'], plot=False)
         except (OSError, RuntimeError, ValueError) as ex:   # no network or no token: the default optical state

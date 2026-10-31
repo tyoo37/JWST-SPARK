@@ -13,7 +13,6 @@ brightness do not (-0.02 to +0.01), and 85-100% of the pixels the correction ser
 correction is applied."""
 import numpy as np
 from scipy import ndimage
-from .curve import SAT_DN
 
 LEVELS = (2, 3, 4)       # pixels whose first saturated group is 2-4: bright, with 2-4 good groups, like the level-1 pixels
 FLUX_ESTIMATED = 2**28   # PIXELDQ: jwst 1.21 marks the pixels flagged only because a neighbour saturated
@@ -66,7 +65,7 @@ def neighbour_gap(e, i, ab):
     charge from the neighbour that saturates during it (later increments hold more: 0.1-0.2 dex), so the gap is an upper bound of
     these pixels' error, carried in their ERR. ab: (a, b) of the integration."""
     G, lev, raw = e['ro'].ngroups, e['lev'][i], e['raw'][i]
-    nb = (lev == 1) & (raw[1] < SAT_DN) & np.isfinite(e['lin0'][i])
+    nb = (lev == 1) & (raw[1] < e['satdn']) & np.isfinite(e['lin0'][i])
     if G < 2 or not nb.any():
         return nb, np.array([])
     g5 = min(G, 5)
@@ -74,7 +73,7 @@ def neighbour_gap(e, i, ab):
     clean = ((e['pdq'] & ~np.uint32(FLUX_ESTIMATED)) == 0) & ~e['jump'][i]
     inc = raw[1] - raw[0]
     ctl = clean & (lev >= g5) & (ndimage.minimum_filter(lev, footprint=NB, mode='nearest') >= g5) & np.isfinite(X) & (X > 0) & (inc > 0)
-    edges = np.arange(0, SAT_DN + 2000, 2000)
+    edges = np.arange(0, 66_000, 2000)
     k = np.digitize(raw[0], edges)
     fac = np.full(len(edges) + 1, np.nan)
     for j in np.unique(k[ctl]):
@@ -85,6 +84,13 @@ def neighbour_gap(e, i, ab):
     xl1 = (e['lin0'][i] - ab[1]) / ab[0]
     s = nb & clean & (x0 > 0) & (xl1 > 0)
     return nb, np.log10(xl1[s] / x0[s])
+
+
+def pipeline_ab(ro):
+    """(a, b) that reproduce the pipeline's own one-group rate: NIRCam lin0 / t0, t0 = (NFRAMES + 1) / 2 x TFRAME (group 0 is
+    the mean of its frames). Used for NIRCam ramps of fewer than 3 groups, where a fit on 2-group pixels is unreliable (their
+    rate is g1 - g0, so X and lin0 share the group-0 noise: a = 0.272 against 0.30 expected in a SHALLOW2 2-group set)."""
+    return (ro.nframes + 1) / 2 * ro.tframe / ro.tgroup, 0.0
 
 
 def correct(e, ab):

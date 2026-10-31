@@ -95,9 +95,9 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         e = exposure.load(p)
         ro = e['ro']
         ro0 = ro0 or ro
-        assert (ro.instrument, ro.filter, ro.ngroups, ro.nints, ro.readpatt) == (ro0.instrument, ro0.filter, ro0.ngroups, ro0.nints, ro0.readpatt), \
+        assert (ro.instrument, ro.detector, ro.filter, ro.ngroups, ro.nints, ro.readpatt) == (ro0.instrument, ro0.detector, ro0.filter, ro0.ngroups, ro0.nints, ro0.readpatt), \
             f'{e["name"]}: one filter and readout per run ({ro} vs {ro0})'
-        assert ro.instrument == 'MIRI', 'the response curve and level-1 correction are MIRI methods'
+        assert ro.instrument in ('MIRI', 'NIRCAM'), f'{ro.instrument}: MIRI imager and NIRCam only'
         lin_refs.add(str(e['header'].get('R_LINEAR', 'unknown')).replace('crds://', '').replace('.fits', ''))
         l1data += [level1.samples(e, i, rng) for i in range(ro.nints)]      # one entry per unit (exposure x integration)
         cal_parts.append(curve.calibrators(e, k, e['rates'], rng))   # level-1 rows corrected below, once (a, b) are known
@@ -112,7 +112,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
             s = np.union1d(rng.choice(len(r0), min(len(r0), 20_000), replace=False), np.nonzero(r0 >= 30_000)[0])
             m_raw[-1].append(r0[s]); m_lin[-1].append(e['lin0'][i][g[i]][s])
         census.append(dict(exposure=e['name'], nints=ro.nints, level0=int((e['lev'] == 0).sum()),
-                           level0_flagged_neighbour=int(((e['lev'] == 0) & (e['raw'][:, 0] < curve.SAT_DN)).sum()),
+                           level0_flagged_neighbour=int(((e['lev'] == 0) & (e['raw'][:, 0] < e['satdn'])).sum()),
                            level1=int((e['lev'] == 1).sum()), no_pipeline_value=int(np.isnan(e['sci']).sum())))
         log(f'{e["name"]}: level 0 {census[-1]["level0"]}, level 1 {census[-1]["level1"]}, level-1 fit pixels '
             f'{[len(d[0]) for d in l1data[-ro.nints:]]}', flush=True)
@@ -135,6 +135,10 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                                 pooled=not own, **(level1.selftest(X, y, rng) if own else {})))
         if not any(not r['pooled'] for r in l1tests if r['integration'] == i):
             l1tests.append(dict(exposure='all (pooled)', integration=i, a=pooled[0], b=pooled[1], pooled=True, **level1.selftest(Xp, yp, rng)))
+    miri = ro0.instrument == 'MIRI'
+    if not miri and ro0.ngroups < 3:
+        AB[:] = level1.pipeline_ab(ro0)
+        log(f'NIRCam with {ro0.ngroups} groups: level-1 pixels keep the pipeline one-group rate (a, b) = {AB[0]}', flush=True)
     del l1data
     inv_flat = exposure.inverse_flat(ratios)
     del ratios
@@ -157,7 +161,9 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     lx, q_first, err_curve, q_valid, qthr = (np.full(len(t['x']), np.nan) for _ in range(5))
     curves, npz = {}, {}
     n_par = np.bincount(c['y'] % 2, minlength=2)
-    classes = [(0,), (1,)] if n_par.min() >= MIN_ROWS else [(0, 1)] if n_par.sum() >= MIN_ROWS // 2 else []
+    # NIRCam: the raw signal of a saturated group rises only to 1.06-1.15 x the threshold, a usable curve spans 1.0-1.3 x the
+    # threshold charge (satrestore_tests/nircam, W51 nircam_curve), so no curve is built
+    classes = ([(0,), (1,)] if n_par.min() >= MIN_ROWS else [(0, 1)] if n_par.sum() >= MIN_ROWS // 2 else []) if miri else []
     log(f'calibrator rows, even / odd detector rows: {n_par[0]} / {n_par[1]}; curves for rows {classes}', flush=True)
     for cls in classes:
         p = ''.join(map(str, cls))
@@ -193,7 +199,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     ref = np.loadtxt(ref_path, delimiter=',') if ((ro0.instrument, ro0.readpatt, ro0.subarray) == ('MIRI', 'FASTR1', 'FULL')
                                                   and os.path.exists(ref_path)) else None
     log(f'linearity reference {lin_ref}: reference map {"used beyond the own range" if ref is not None else "none"}', flush=True)
-    for i in range(NI):
+    for i in range(NI) if miri else ():     # NIRCam: raw group 0 carries per-pixel bias and amplifier offsets, so no raw map
         r0, l0 = np.concatenate([m[i] for m in m_raw]), np.concatenate([m[i] for m in m_lin])
         xm, ym = lin0_map(r0, l0)
         bi = float(np.median(AB[i::NI, 1]))
@@ -221,7 +227,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     rate[beyond], method[beyond] = np.nan, 4
     log(f'curve: {int(beyond.sum())} target rows beyond the validated range (self-test half-width <= {MAX_ERR} dex)', flush=True)
     l1err = float(np.median([np.hypot(r['median'], r['half_width']) for r in l1tests if 'median' in r]))
-    l0err = float(np.hypot(l1err, np.nanmax([np.hypot(r[f'median{s}'], r[f'half_width{s}']) for r in l0tests for s in ('', '_bright')])))
+    l0err = float(np.hypot(l1err, np.nanmax([np.hypot(r[f'median{s}'], r[f'half_width{s}']) for r in l0tests for s in ('', '_bright')]))) if l0tests else np.nan
     err = np.where(method == 3, err_curve, np.where(method == 2, l0err, np.nan))
 
     # PSF: one model per observation date; self-test on unsaturated stars of up to NPSF_TEST exposures
