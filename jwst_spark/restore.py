@@ -34,8 +34,11 @@ REF_DIR = os.path.join(os.path.dirname(__file__), 'data')   # raw -> linearised 
                                # linearity reference (miri_group0_map_<reference>.csv); used beyond a dataset's own range
 REF_AGREE = 0.003              # dex: the reference map is used only if it matches the dataset's own map this well where both
                                # are sampled (brick, cloudc against ngc6334: 0.0015 or better)
-PSF_BIAS = 0.05                # dex: PSF fills only if the PSF self-test (median over 1-15 pixels hidden) and the PSF fit against the curve
+PSF_BIAS = 0.05                # dex: PSF fills only if the PSF self-test (every bin of 1-15 pixels hidden) and the PSF fit against the curve
                                # where both give a value are both within this (gc1266 F770W: self-test +0.13 dex; ngc6334 F2100W: against the curve +0.16)
+PSF_SOLO = 0.02                # dex: with no curve value to compare with, the self-test alone must be within this. The self-test is a lower
+                               # bound (hidden pixels sit closer to measured ones than real cores do): F770W sets passed it at 0.04-0.05 dex
+                               # while their PSF fits ran 0.13-0.22 dex above the curve; F2550W self-tests stay within 0.02
 NMIN_L1 = 2000                 # pixels with 2-4 good groups needed for an exposure's own level-1 fit; fewer: the pooled fit
 L1_OK = 0.05                   # dex: a level-1 fit is used only if its self-test on the brightest 10% has |median| and half-width within
                                # this (MIRI test sets: up to 0.043 and 0.044; one NIRCam gc9257 exposure with 3,911 pixels fitted a = 0.002,
@@ -257,8 +260,9 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                      half_width=hw(prow[prow[:, 1] == nh, 2])) for nh in psf.HIDE if (prow[:, 1] == nh).sum() >= 20]
     psf_err = max([np.hypot(r['median'], r['half_width']) for r in psf_test], default=np.nan)
     log('PSF self-test (pixels hidden, n, median, half-width dex):', [(r['hidden'], r['n'], round(r['median'], 3), round(r['half_width'], 3)) for r in psf_test], flush=True)
-    small = prow[prow[:, 1] <= 15, 2]            # pooled over 1-15 hidden pixels: single bins can hold few stars (brick: 77)
-    psf_selftest_ok = len(small) >= 50 and abs(float(np.median(small))) <= PSF_BIAS
+    # the worst bin of 1-15 hidden pixels (a pooled median is set by the 15-px bin, which holds most stars)
+    dev = max([abs(r['median']) for r in psf_test if r['hidden'] <= 15], default=np.inf)
+    psf_selftest_ok = dev <= PSF_BIAS
     star_model, star_info = starmodel.train(prow) if mode == 'train' else (None, {})
     if mode == 'train':
         star_err = max([np.hypot(r['trained_median'], r['trained_half_width']) for r in star_info.get('selftest', [])], default=psf_err)
@@ -319,8 +323,8 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     if both_direct:
         star_info['direct_psf_minus_curve'] = agree_of(np.concatenate(both_direct))
         log('  (direct PSF fit, before the trained correction:', star_info['direct_psf_minus_curve'], ')', flush=True)
-    use_psf = psf_selftest_ok and (not agree or abs(agree['median']) <= PSF_BIAS)
-    log(f'PSF fills {"on" if use_psf else "off"}: self-test within {PSF_BIAS} dex: {psf_selftest_ok}; against the curve: '
+    use_psf = (psf_selftest_ok and abs(agree['median']) <= PSF_BIAS) if agree else dev <= PSF_SOLO
+    log(f'PSF fills {"on" if use_psf else "off"}: self-test, worst bin of 1-15 hidden {dev:.3f} dex; against the curve: '
         f'{agree.get("median", "no overlap")}', flush=True)
     gap = np.concatenate(gaps)
     nb = dict(n=int(len(gap)), median=float(np.median(gap)), half_width=hw(gap)) if len(gap) >= 30 else dict(n=int(len(gap)))
@@ -347,6 +351,6 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                    level1_neighbour_flagged=dict(nb, err=nb_err),
                    curve=dict(curves, beyond_valid=int(beyond.sum())), first_group=dict(map_selftest=l0tests, err=l0err),
                    psf=dict(selftest=psf_test, err=psf_err, psf_minus_curve=agree, rchi2_max=psf.RCHI2_MAX, fills_on=bool(use_psf),
-                            selftest_ok=bool(psf_selftest_ok)), star_model=star_info, counts=counts)
+                            selftest_ok=bool(psf_selftest_ok), selftest_worst_bin=float(dev)), star_model=star_info, counts=counts)
     json.dump(summary, open(f'{out_dir}/summary.json', 'w'), indent=1)
     return summary
