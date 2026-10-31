@@ -75,7 +75,7 @@ At F2550W the PSF fit and the curve agree to 0.002-0.022 dex. At F770W-F2100W th
 - Reference maps exist for FASTR1 full frame and three linearity references.
 - The response curve is tested only up to the charge its calibration pixels reach; brighter pixels stay empty. When the calibration pixels do not reach saturation at all (one F770W test set), the curve restores nothing.
 - At F770W-F2100W the PSF fit is biased high against the curve, probably because the model lacks detector features such as the cruciform; PSF fills stay off there.
-- Pixels the pipeline flags only because a neighbour saturated in group 1 look like level-1 pixels. Against estimates from their own later groups, the level-1 correction reads them 0.05-0.2 dex low (tested on MIRI F770W-F2100W). Part of that gap may come from charge the neighbour adds to those later groups, so the size is not settled yet.
+- Pixels the pipeline flags only because a neighbour saturated in group 1 look like level-1 pixels and keep the level-1 correction. Neighbours flagged from group 3 or 4 follow the level-1 relation to 0.00-0.04 dex against their own groups taken before the neighbour saturated. The later groups of the group-1 neighbours carry 0.1-0.2 dex of extra charge from the saturating pixel. Their first increment still reads 0.04-0.12 dex above the level-1 value; part of that is the same charge. The run measures this gap on each dataset (`summary.json`, `level1_neighbour_flagged`) and adds it to these pixels' `ERR`.
 - Even detector rows near saturation scatter more than odd rows, and the scatter does not repeat between exposures. Their larger error is carried in `ERR`. Level-1 corrected pixels keep an even/odd pattern of about ±0.01 dex.
 
 ## Tests
