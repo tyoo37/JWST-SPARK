@@ -37,7 +37,11 @@ REF_AGREE = 0.003              # dex: the reference map is used only if it match
 PSF_BIAS = 0.05                # dex: PSF fills only if the PSF self-test (median over 1-15 pixels hidden) and the PSF fit against the curve
                                # where both give a value are both within this (gc1266 F770W: self-test +0.13 dex; ngc6334 F2100W: against the curve +0.16)
 NMIN_L1 = 2000                 # pixels with 2-4 good groups needed for an exposure's own level-1 fit; fewer: the pooled fit
+L1_OK = 0.05                   # dex: a level-1 fit is used only if its self-test on the brightest 10% has |median| and half-width within
+                               # this (MIRI test sets: up to 0.043 and 0.044; one NIRCam gc9257 exposure with 3,911 pixels fitted a = 0.002,
+                               # self-test +2.5 dex; omegacen's second integrations: half-width 0.20-0.22)
 hw = lambda v: float((np.percentile(v, 84) - np.percentile(v, 16)) / 2)
+l1_ok = lambda t: abs(t['median_top10']) <= L1_OK and t['half_width_top10'] <= L1_OK
 
 
 def lin0_map(raw0, lin0):
@@ -122,20 +126,25 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     defect = ndimage.binary_dilation(lev0 >= DEFECT * nu, iterations=2) if n >= 4 else np.zeros(lev0.shape, bool)
     log(f'detector defects (saturated in their first group in >= {DEFECT:.0%} of {nu} integrations): {int(defect.sum())} pixels', flush=True)
 
-    # level-1 correction: (a, b) per unit, pooled over the exposures (per integration) where a unit has too few pixels
+    # level-1 correction: (a, b) per unit, pooled over the exposures (per integration) where a unit has too few pixels or fails
+    # its self-test; NIRCam, when the pooled fit fails too: the pipeline's own one-group rate
+    miri = ro0.instrument == 'MIRI'
     AB, l1tests = np.zeros((nu, 2)), []
     for i in range(NI):
         Xp, yp = np.concatenate([l1data[u][0] for u in range(i, nu, NI)]), np.concatenate([l1data[u][1] for u in range(i, nu, NI)])
-        pooled = level1.fit(Xp, yp)
+        pooled, pt = level1.fit(Xp, yp), level1.selftest(Xp, yp, rng)
+        fallback, fb = (pooled, 'pooled') if l1_ok(pt) or miri else (level1.pipeline_ab(ro0), 'pipeline')
         for u in range(i, nu, NI):
             X, y = l1data[u]
-            own = len(X) >= NMIN_L1
-            AB[u] = level1.fit(X, y) if own else pooled
+            t = level1.selftest(X, y, rng) if len(X) >= NMIN_L1 else {}
+            own = bool(t) and l1_ok(t)
+            AB[u] = level1.fit(X, y) if own else fallback
             l1tests.append(dict(exposure=os.path.basename(cal_paths[u // NI])[:-9], integration=i, a=AB[u, 0], b=AB[u, 1],
-                                pooled=not own, **(level1.selftest(X, y, rng) if own else {})))
-        if not any(not r['pooled'] for r in l1tests if r['integration'] == i):
-            l1tests.append(dict(exposure='all (pooled)', integration=i, a=pooled[0], b=pooled[1], pooled=True, **level1.selftest(Xp, yp, rng)))
-    miri = ro0.instrument == 'MIRI'
+                                pooled=not own, source='own' if own else fb, **(t if own else {'rejected_selftest': t})))
+        if fb == 'pooled' and any(r['source'] == 'pooled' for r in l1tests if r['integration'] == i):
+            l1tests.append(dict(exposure='all (pooled)', integration=i, a=pooled[0], b=pooled[1], pooled=True, source='pooled', **pt))
+        log(f'level-1 fits, integration {i}: ' + ', '.join(f'{s} {sum(r["source"] == s and r["exposure"] != "all (pooled)" for r in l1tests if r["integration"] == i)}'
+                                                     for s in ('own', 'pooled', 'pipeline')) + f'; pooled self-test {pt}', flush=True)
     if not miri and ro0.ngroups < 3:
         AB[:] = level1.pipeline_ab(ro0)
         log(f'NIRCam with {ro0.ngroups} groups: level-1 pixels keep the pipeline one-group rate (a, b) = {AB[0]}', flush=True)
@@ -226,7 +235,10 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     beyond = (method == 3) & ~(q_first <= q_valid)
     rate[beyond], method[beyond] = np.nan, 4
     log(f'curve: {int(beyond.sum())} target rows beyond the validated range (self-test half-width <= {MAX_ERR} dex)', flush=True)
-    l1err = float(np.median([np.hypot(r['median'], r['half_width']) for r in l1tests if 'median' in r]))
+    # from the fits in use; with none (NIRCam on the pipeline's own rate throughout), from the rejected self-tests
+    l1err = float(np.median([np.hypot(r['median'], r['half_width']) for r in l1tests if 'median' in r]
+                            or [np.hypot(r['rejected_selftest']['median'], r['rejected_selftest']['half_width'])
+                                for r in l1tests if r.get('rejected_selftest')] or [np.nan]))
     l0err = float(np.hypot(l1err, np.nanmax([np.hypot(r[f'median{s}'], r[f'half_width{s}']) for r in l0tests for s in ('', '_bright')]))) if l0tests else np.nan
     err = np.where(method == 3, err_curve, np.where(method == 2, l0err, np.nan))
 
