@@ -11,6 +11,9 @@ def test_level1_fit_and_selftest():
     assert abs(a - 0.78) < 0.01 and abs(b - 4400) < 60
     t = level1.selftest(X, y, rng)
     assert abs(t['median']) < 0.002 and t['half_width'] < 0.01
+    X[0], y[0] = 2.6e9, 5.1e6                                         # one absurd unflagged pixel (NIRCam gc9257)
+    a, b = level1.fit(X, y)
+    assert abs(a - 0.78) < 0.01 and abs(b - 4400) < 60, (a, b)
 
 
 def test_invert_recovers_charge():

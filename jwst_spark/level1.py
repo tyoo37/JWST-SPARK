@@ -32,7 +32,14 @@ def samples(e, i, rng, nmax=50_000):
 
 
 def fit(X, y):
-    a, b = np.polyfit(X, y, 1)
+    """lin0 = a X + b by least squares, after dropping points more than 5 robust sigma off a first line through the medians of 20
+    brightness bins (one unflagged NIRCam pixel with X = 2.6e9 DN, lin0 = 5e6 DN pulled a gc9257 exposure's fit to a = 0.002)."""
+    q = np.percentile(X, np.linspace(1, 99, 21))
+    k = np.digitize(X, q)
+    xm, ym = zip(*[(np.median(X[k == i]), np.median(y[k == i])) for i in range(1, 21) if (k == i).any()])
+    r = y - np.polyval(np.polyfit(xm, ym, 1), X)
+    keep = np.abs(r) <= 5 * 1.4826 * np.median(np.abs(r)) if np.median(np.abs(r)) > 0 else np.ones(len(X), bool)
+    a, b = np.polyfit(X[keep], y[keep], 1)
     return float(a), float(b)
 
 
