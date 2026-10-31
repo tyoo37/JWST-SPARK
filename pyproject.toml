@@ -5,10 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jwst-spark"
 version = "0.1.0"
-description = "JWST-SPARK: Saturated Pixel Automated Recovery Kit, restoring saturated pixels in JWST MIRI imaging"
+description = "JWST-SPARK: Saturated Pixel Automated Recovery Kit, restoring saturated pixels in JWST MIRI and NIRCam imaging"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy", "scipy", "astropy", "photutils", "stpsf", "scikit-learn"]
+
+[project.optional-dependencies]
+nircam = ["crds"]
 
 [project.scripts]
 jwst-spark = "jwst_spark.__main__:main"
