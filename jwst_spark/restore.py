@@ -150,6 +150,8 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                                                      for s in ('own', 'pooled', 'pipeline')) + f'; pooled self-test {pt}', flush=True)
     if not miri and ro0.ngroups < 3:
         AB[:] = level1.pipeline_ab(ro0)
+        for r in l1tests:
+            r.update(source='pipeline (fewer than 3 groups)', a=AB[0, 0], b=AB[0, 1])
         log(f'NIRCam with {ro0.ngroups} groups: level-1 pixels keep the pipeline one-group rate (a, b) = {AB[0]}', flush=True)
     del l1data
     inv_flat = exposure.inverse_flat(ratios)
@@ -286,6 +288,10 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         R[t['int_'][s], t['y'][s], t['x'][s]] = rate[s]
         M[t['int_'][s], t['y'][s], t['x'][s]] = method[s]
         E[t['int_'][s], t['y'][s], t['x'][s]] = err[s]
+        # the pipeline's own value where the package has none (NIRCam: rates from the ZEROFRAME of pixels saturated in group 0;
+        # brick F200W lost them in the first version)
+        keep = np.isnan(R) & np.isfinite(e['rates']) & (e['lev'] == 0)
+        R[keep], M[keep] = e['rates'][keep], 0
         touched = ((e['lev'] <= 1) | l1).any(0) & ((e['dq'] & curve.NOFLAT) == 0)
         with np.errstate(all='ignore'):
             new = np.nanmean(np.where(np.isfinite(R) & (R > 0), R, np.nan), 0) * conv
@@ -314,7 +320,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
             pv, code, perr = pt, 6, star_err
         cmp = (meth == 3) & (pv > 0) & (sci > 0)
         both.append(np.log10(pv[cmp] / sci[cmp]))
-        pending.append((e['name'], int(np.isnan(e['sci']).sum()), conv_check, sci, meth, errd, (nbl1 & used).any(0),
+        pending.append((e['name'], np.isfinite(e['sci']), conv_check, sci, meth, errd, (nbl1 & used).any(0),
                         np.where(pv > 0, pv, np.nan).astype(np.float32), code, perr))
 
     agree_of = lambda v: dict(n=int(len(v)), median=float(np.median(v)), half_width=hw(v)) if len(v) >= 20 else {}
@@ -330,7 +336,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     nb = dict(n=int(len(gap)), median=float(np.median(gap)), half_width=hw(gap)) if len(gap) >= 30 else dict(n=int(len(gap)))
     nb_err = float(np.hypot(l1err, nb['median'])) if 'median' in nb else l1err
     log(f'level-1 pixels flagged only by a saturated neighbour: level-1 value against their first increment {nb}; their ERR {nb_err:.3f} dex', flush=True)
-    for name, nv0, conv_check, sci, meth, errd, nbu, pv, code, perr in pending:
+    for name, had, conv_check, sci, meth, errd, nbu, pv, code, perr in pending:
         if use_psf:
             fill = (meth == 4) & np.isfinite(pv)
             sci[fill], meth[fill], errd[fill] = pv[fill], code, perr
@@ -344,9 +350,10 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         fits.HDUList([fits.PrimaryHDU(header=hdr), fits.ImageHDU(sci, name='SCI', header=fits.Header([('BUNIT', 'MJy/sr')])),
                       fits.ImageHDU(meth, name='METHOD'), fits.ImageHDU(errd, name='ERR', header=fits.Header([('BUNIT', 'dex')]))]
                      ).writeto(f'{out_dir}/{name}_spark.fits', overwrite=True)
-        counts.append(dict(exposure=name, conv_check_dex=conv_check, no_value_before=nv0,
-                           no_value_after=int(np.isnan(sci).sum()), **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
-        log(f'{name}: conversion check {conv_check:.4f} dex; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)
+        counts.append(dict(exposure=name, conv_check_dex=conv_check, no_value_before=int((~had).sum()), no_value_after=int(np.isnan(sci).sum()),
+                           pipeline_values_lost=int((had & np.isnan(sci)).sum()),    # only detector defects and their margin should
+                           **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
+        log(f'{name}: conversion check {conv_check:.4f} dex; pipeline values lost {counts[-1]["pipeline_values_lost"]}; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)
     summary = dict(mode=mode, readout=vars(ro0), n_exposures=n, census=census, detector_defects=int(defect.sum()), level1=l1tests,
                    level1_neighbour_flagged=dict(nb, err=nb_err),
                    curve=dict(curves, beyond_valid=int(beyond.sum())), first_group=dict(map_selftest=l0tests, err=l0err),
