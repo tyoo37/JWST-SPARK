@@ -5,10 +5,20 @@ each integration (after the first, the detector starts from a different state: i
 b = 4,700-4,900 DN in the first integration and a = 0.78, b = 5,800 DN in the second).
 Fitting (a, b) per detector row parity was tried (2026-10-30) and removed: it moved level-1 values by only ~0.0025 dex, was
 unstable in small samples (brick), and left the even/odd pattern of level-1 pixels (+-0.01-0.02 dex, growing with brightness
-near saturation, against +-0.004 for bright unsaturated pixels) in place."""
+near saturation, against +-0.004 for bright unsaturated pixels) in place.
+Pixels flagged only because a neighbour saturated keep the correction: neighbours flagged from group 3 or 4 agree with their own
+increments before the neighbour saturates to 0.00-0.04 dex (2026-10-31, satrestore_tests/diag_l1spill.py, W51 and four test sets).
+Isolated faint pixels drift from the relation (cloudef +0.04 dex at 4,000-6,000 DN, W51 -0.05), neighbours of the same
+brightness do not (-0.02 to +0.01), and 85-100% of the pixels the correction serves are brighter than 6,000 DN, so no drift
+correction is applied."""
 import numpy as np
+from scipy import ndimage
+from .curve import SAT_DN
 
 LEVELS = (2, 3, 4)       # pixels whose first saturated group is 2-4: bright, with 2-4 good groups, like the level-1 pixels
+FLUX_ESTIMATED = 2**28   # PIXELDQ: jwst 1.21 marks the pixels flagged only because a neighbour saturated
+NB = np.ones((3, 3), bool)
+NB[1, 1] = False         # the 8 neighbours
 
 
 def samples(e, i, rng, nmax=50_000):
@@ -47,6 +57,34 @@ def pixels(e):
     """Pixel-integrations the correction serves: level 1, and levels 2-4 left without a pipeline rate (jwst 1.15 drops MIRI's
     first group, so a 2-group ramp keeps one group and gets no rate; sgrb2). Needs no pipeline rate, only lin0."""
     return ((e['lev'] == 1) | (np.isin(e['lev'], LEVELS) & ~np.isfinite(e['rates']))) & np.isfinite(e['lin0'])
+
+
+def neighbour_gap(e, i, ab):
+    """Level-1 pixels of integration i flagged only because a neighbour saturated (raw group 1 below saturation): mask (ny, nx),
+    and log10 of their level-1 value over their own first increment g1 - g0, calibrated to rate x TGROUP on pixels of the same
+    raw group-0 level (2,000-DN bins) with no saturation in themselves or their neighbours up to group 4. The increment also holds
+    charge from the neighbour that saturates during it (later increments hold more: 0.1-0.2 dex), so the gap is an upper bound of
+    these pixels' error, carried in their ERR. ab: (a, b) of the integration."""
+    G, lev, raw = e['ro'].ngroups, e['lev'][i], e['raw'][i]
+    nb = (lev == 1) & (raw[1] < SAT_DN) & np.isfinite(e['lin0'][i])
+    if G < 2 or not nb.any():
+        return nb, np.array([])
+    g5 = min(G, 5)
+    X = e['rates'][i] * e['ro'].tgroup
+    clean = ((e['pdq'] & ~np.uint32(FLUX_ESTIMATED)) == 0) & ~e['jump'][i]
+    inc = raw[1] - raw[0]
+    ctl = clean & (lev >= g5) & (ndimage.minimum_filter(lev, footprint=NB, mode='nearest') >= g5) & np.isfinite(X) & (X > 0) & (inc > 0)
+    edges = np.arange(0, SAT_DN + 2000, 2000)
+    k = np.digitize(raw[0], edges)
+    fac = np.full(len(edges) + 1, np.nan)
+    for j in np.unique(k[ctl]):
+        s = ctl & (k == j)
+        if s.sum() >= 30:
+            fac[j] = np.median(X[s] / inc[s])
+    x0 = inc * fac[k]
+    xl1 = (e['lin0'][i] - ab[1]) / ab[0]
+    s = nb & clean & (x0 > 0) & (xl1 > 0)
+    return nb, np.log10(xl1[s] / x0[s])
 
 
 def correct(e, ab):

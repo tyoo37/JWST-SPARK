@@ -247,7 +247,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         log('star predictor:', star_info, flush=True)
 
     # pass 2: one sidecar per exposure (written once the PSF fit's agreement with the curve over all exposures is known)
-    counts, both, both_direct, pending = [], [], [], []
+    counts, both, both_direct, pending, gaps = [], [], [], [], []
     for k, p in enumerate(cal_paths):
         e = exposure.load(p)
         conv = e['photmjsr'] * inv_flat
@@ -256,6 +256,10 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
         E = np.full(e['lev'].shape, np.nan, np.float32)
         l1 = level1.pixels(e)
         R[l1], M[l1], E[l1] = level1.correct(e, AB[k * NI:(k + 1) * NI])[l1], 1, l1err
+        nbl1 = np.zeros(l1.shape, bool)              # level 1 only because a neighbour saturated: ERR set once all gaps are known
+        for i in range(NI):
+            nbl1[i], g = level1.neighbour_gap(e, i, AB[k * NI + i])
+            gaps.append(g)
         s = t['k'] == k
         R[t['int_'][s], t['y'][s], t['x'][s]] = rate[s]
         M[t['int_'][s], t['y'][s], t['x'][s]] = method[s]
@@ -288,7 +292,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
             pv, code, perr = pt, 6, star_err
         cmp = (meth == 3) & (pv > 0) & (sci > 0)
         both.append(np.log10(pv[cmp] / sci[cmp]))
-        pending.append((e['name'], int(np.isnan(e['sci']).sum()), conv_check, sci, meth, errd,
+        pending.append((e['name'], int(np.isnan(e['sci']).sum()), conv_check, sci, meth, errd, (nbl1 & used).any(0),
                         np.where(pv > 0, pv, np.nan).astype(np.float32), code, perr))
 
     agree_of = lambda v: dict(n=int(len(v)), median=float(np.median(v)), half_width=hw(v)) if len(v) >= 20 else {}
@@ -300,11 +304,17 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
     use_psf = psf_selftest_ok and (not agree or abs(agree['median']) <= PSF_BIAS)
     log(f'PSF fills {"on" if use_psf else "off"}: self-test within {PSF_BIAS} dex: {psf_selftest_ok}; against the curve: '
         f'{agree.get("median", "no overlap")}', flush=True)
-    for name, nv0, conv_check, sci, meth, errd, pv, code, perr in pending:
+    gap = np.concatenate(gaps)
+    nb = dict(n=int(len(gap)), median=float(np.median(gap)), half_width=hw(gap)) if len(gap) >= 30 else dict(n=int(len(gap)))
+    nb_err = float(np.hypot(l1err, nb['median'])) if 'median' in nb else l1err
+    log(f'level-1 pixels flagged only by a saturated neighbour: level-1 value against their first increment {nb}; their ERR {nb_err:.3f} dex', flush=True)
+    for name, nv0, conv_check, sci, meth, errd, nbu, pv, code, perr in pending:
         if use_psf:
             fill = (meth == 4) & np.isfinite(pv)
             sci[fill], meth[fill], errd[fill] = pv[fill], code, perr
         sci[meth == 7], errd[meth == 7] = np.nan, np.nan
+        s = nbu & (meth == 1)
+        errd[s] = np.fmax(errd[s], nb_err)
         hdr = fits.Header()
         hdr['EXPOSURE'], hdr['MODE'], hdr['CONVCHK'] = name, mode, (conv_check, 'median |dex| of rate x conv vs pipeline SCI')
         for i, m in enumerate(METHODS):
@@ -316,6 +326,7 @@ def run(cal_paths, out_dir, mode='notrain', seed=0, psf_cache=None, log=print):
                            no_value_after=int(np.isnan(sci).sum()), **{m: int((meth == i).sum()) for i, m in enumerate(METHODS) if i}))
         log(f'{name}: conversion check {conv_check:.4f} dex; ' + ', '.join(f'{m} {counts[-1][m]}' for m in METHODS[1:]), flush=True)
     summary = dict(mode=mode, readout=vars(ro0), n_exposures=n, census=census, detector_defects=int(defect.sum()), level1=l1tests,
+                   level1_neighbour_flagged=dict(nb, err=nb_err),
                    curve=dict(curves, beyond_valid=int(beyond.sum())), first_group=dict(map_selftest=l0tests, err=l0err),
                    psf=dict(selftest=psf_test, err=psf_err, psf_minus_curve=agree, rchi2_max=psf.RCHI2_MAX, fills_on=bool(use_psf),
                             selftest_ok=bool(psf_selftest_ok)), star_model=star_info, counts=counts)

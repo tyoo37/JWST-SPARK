@@ -51,3 +51,19 @@ def test_star_predictor_learns_psf_error():
             rows += [(sid, nh, e_, *fr) for e_, fr in zip(err, f)]
     _, info = starmodel.train(rows)
     assert all(abs(r['trained_median']) < 0.01 and r['trained_half_width'] < 0.01 for r in info['selftest']), info
+
+
+def test_neighbour_gap_measures_extra_charge():
+    from types import SimpleNamespace
+    rng = np.random.default_rng(0)
+    X = rng.uniform(3000, 15000, (80, 80))
+    lev = np.full((1, 80, 80), 5, np.int16)
+    lev[0, :20, :20] = 1                                  # flagged from group 1 by a saturated neighbour
+    raw = np.zeros((1, 5, 80, 80), np.float32)
+    raw[0, 0] = 4400 + 0.78 * X
+    for g in range(1, 5):
+        raw[0, g] = raw[0, g - 1] + np.where((lev[0] == 1) & (g == 1), 1.2 * X, X)    # 20% extra charge in their first increment
+    e = dict(ro=SimpleNamespace(ngroups=5, tgroup=1.0), lev=lev, raw=raw, rates=X[None], pdq=np.zeros((80, 80), np.uint32),
+             jump=np.zeros((1, 80, 80), bool), lin0=(4400 + 0.78 * X)[None])
+    nb, gap = level1.neighbour_gap(e, 0, (0.78, 4400.))
+    assert nb.sum() == 400 and abs(np.median(gap) + np.log10(1.2)) < 0.005, (nb.sum(), np.median(gap))
